@@ -1,0 +1,25 @@
+{
+  "admin_user_ids": {
+    "description": "允许执行导入、发布、重置的管理员用户 ID 列表。",
+    "type": "list",
+    "default": [],
+    "items": {
+      "type": "string"
+    }
+  },
+  "max_import_chars": {
+    "description": "单次导入允许的最大 Markdown 字符数。",
+    "type": "int",
+    "default": 20000
+  },
+  "max_list_size": {
+    "description": "列表命令单次最多返回多少条剧本。",
+    "type": "int",
+    "default": 20
+  },
+  "db_filename": {
+    "description": "SQLite 数据库文件名，将保存在插件数据目录下。",
+    "type": "string",
+    "default": "trpg.sqlite3"
+  }
+}

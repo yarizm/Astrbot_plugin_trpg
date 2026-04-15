@@ -1,0 +1,7 @@
+name: astrbot_plugin_trpg
+display_name: 跑团选本助手
+desc: 导入 Markdown 剧本大纲，审核发布候选剧本，并在群内完成选本绑定。
+help: 使用 /trpg 查看可用子命令，管理员可用 /trpg 导入 开始导入剧本大纲。
+version: 0.1.0
+author: YARIZM
+astrbot_version: ">=4.16,<5"
