@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
 
-from core.parser import ParsedScenario
+from .parser import ParsedScenario
 
 
 STATUS_DRAFT = "draft"
@@ -17,6 +17,10 @@ STATUS_ARCHIVED = "archived"
 
 class GroupSessionExistsError(RuntimeError):
     """Raised when a group already has an active scenario binding."""
+
+
+class SoloSessionExistsError(RuntimeError):
+    """Raised when a private solo session already has an active binding."""
 
 
 @dataclass(slots=True)
@@ -59,6 +63,21 @@ class GroupSelectionView:
     selected_at: str
 
 
+@dataclass(slots=True)
+class SoloSessionView:
+    platform_name: str
+    session_id: str
+    user_id: str
+    scenario_id: int
+    scenario_title: str
+    scenario_summary: str
+    scenario_opening_scene: str
+    transcript_json: str
+    turn_count: int
+    created_at: str
+    updated_at: str
+
+
 class TrpgStore:
     """SQLite-backed storage for imports, scenario drafts, and group bindings."""
 
@@ -73,21 +92,26 @@ class TrpgStore:
         imported_by: str,
         imported_session: str,
         scenarios: Iterable[ParsedScenario],
+        source_key: str | None = None,
+        scenario_status: str = STATUS_DRAFT,
     ) -> list[ScenarioRecord]:
         scenario_items = list(scenarios)
         if not scenario_items:
             return []
+        if source_key and self.has_import_source(source_key):
+            return []
 
         now = _utc_now()
+        published_at = now if scenario_status == STATUS_PUBLISHED else None
         created_records: list[ScenarioRecord] = []
         with self._connect() as connection:
             cursor = connection.cursor()
             cursor.execute(
                 """
-                INSERT INTO outline_imports (source_markdown, imported_by, imported_session, created_at)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO outline_imports (source_markdown, imported_by, imported_session, source_key, created_at)
+                VALUES (?, ?, ?, ?, ?)
                 """,
-                (source_markdown, imported_by, imported_session, now),
+                (source_markdown, imported_by, imported_session, source_key, now),
             )
             outline_import_id = int(cursor.lastrowid)
 
@@ -104,8 +128,10 @@ class TrpgStore:
                         raw_markdown,
                         status,
                         created_at
+                        ,
+                        published_at
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         outline_import_id,
@@ -115,8 +141,9 @@ class TrpgStore:
                         scenario.recommended_players,
                         scenario.opening_scene,
                         scenario.raw_markdown,
-                        STATUS_DRAFT,
+                        scenario_status,
                         now,
+                        published_at,
                     ),
                 )
                 created_records.append(
@@ -129,13 +156,26 @@ class TrpgStore:
                         recommended_players=scenario.recommended_players,
                         opening_scene=scenario.opening_scene,
                         raw_markdown=scenario.raw_markdown,
-                        status=STATUS_DRAFT,
+                        status=scenario_status,
                         created_at=now,
-                        published_at=None,
+                        published_at=published_at,
                     )
                 )
 
         return created_records
+
+    def has_import_source(self, source_key: str) -> bool:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT 1
+                FROM outline_imports
+                WHERE source_key = ?
+                LIMIT 1
+                """,
+                (source_key,),
+            ).fetchone()
+        return row is not None
 
     def list_scenarios(self, status: str, limit: int) -> list[ScenarioRecord]:
         limit = max(1, limit)
@@ -285,6 +325,120 @@ class TrpgStore:
             )
         return cursor.rowcount > 0
 
+    def create_solo_session(
+        self,
+        platform_name: str,
+        session_id: str,
+        user_id: str,
+        scenario_id: int,
+        transcript_json: str,
+    ) -> SoloSessionView:
+        now = _utc_now()
+        try:
+            with self._connect() as connection:
+                connection.execute(
+                    """
+                    INSERT INTO solo_sessions (
+                        platform_name,
+                        session_id,
+                        user_id,
+                        scenario_id,
+                        transcript_json,
+                        turn_count,
+                        created_at,
+                        updated_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, 0, ?, ?)
+                    """,
+                    (
+                        platform_name,
+                        session_id,
+                        user_id,
+                        scenario_id,
+                        transcript_json,
+                        now,
+                        now,
+                    ),
+                )
+        except sqlite3.IntegrityError as exc:
+            raise SoloSessionExistsError("solo session already exists") from exc
+
+        session = self.get_solo_session(platform_name, session_id)
+        if not session:
+            raise RuntimeError("solo session create failed")
+        return session
+
+    def get_solo_session(self, platform_name: str, session_id: str) -> SoloSessionView | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT
+                    ss.platform_name,
+                    ss.session_id,
+                    ss.user_id,
+                    ss.scenario_id,
+                    ss.transcript_json,
+                    ss.turn_count,
+                    ss.created_at,
+                    ss.updated_at,
+                    sc.title AS scenario_title,
+                    sc.summary AS scenario_summary,
+                    sc.opening_scene AS scenario_opening_scene
+                FROM solo_sessions AS ss
+                JOIN scenario_candidates AS sc ON sc.id = ss.scenario_id
+                WHERE ss.platform_name = ? AND ss.session_id = ?
+                LIMIT 1
+                """,
+                (platform_name, session_id),
+            ).fetchone()
+
+        if not row:
+            return None
+
+        return SoloSessionView(
+            platform_name=row["platform_name"],
+            session_id=row["session_id"],
+            user_id=row["user_id"],
+            scenario_id=row["scenario_id"],
+            scenario_title=row["scenario_title"],
+            scenario_summary=row["scenario_summary"],
+            scenario_opening_scene=row["scenario_opening_scene"],
+            transcript_json=row["transcript_json"],
+            turn_count=row["turn_count"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
+
+    def update_solo_session(
+        self,
+        platform_name: str,
+        session_id: str,
+        transcript_json: str,
+        turn_count: int,
+    ) -> SoloSessionView | None:
+        updated_at = _utc_now()
+        with self._connect() as connection:
+            connection.execute(
+                """
+                UPDATE solo_sessions
+                SET transcript_json = ?, turn_count = ?, updated_at = ?
+                WHERE platform_name = ? AND session_id = ?
+                """,
+                (transcript_json, turn_count, updated_at, platform_name, session_id),
+            )
+        return self.get_solo_session(platform_name, session_id)
+
+    def reset_solo_session(self, platform_name: str, session_id: str) -> bool:
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """
+                DELETE FROM solo_sessions
+                WHERE platform_name = ? AND session_id = ?
+                """,
+                (platform_name, session_id),
+            )
+        return cursor.rowcount > 0
+
     def _init_db(self) -> None:
         with self._connect() as connection:
             connection.executescript(
@@ -294,6 +448,7 @@ class TrpgStore:
                     source_markdown TEXT NOT NULL,
                     imported_by TEXT NOT NULL,
                     imported_session TEXT NOT NULL,
+                    source_key TEXT,
                     created_at TEXT NOT NULL
                 );
 
@@ -322,6 +477,28 @@ class TrpgStore:
                     UNIQUE(platform_name, session_id),
                     FOREIGN KEY(scenario_id) REFERENCES scenario_candidates(id)
                 );
+
+                CREATE TABLE IF NOT EXISTS solo_sessions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    platform_name TEXT NOT NULL,
+                    session_id TEXT NOT NULL,
+                    user_id TEXT NOT NULL,
+                    scenario_id INTEGER NOT NULL,
+                    transcript_json TEXT NOT NULL DEFAULT '[]',
+                    turn_count INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE(platform_name, session_id),
+                    FOREIGN KEY(scenario_id) REFERENCES scenario_candidates(id)
+                );
+                """
+            )
+            self._ensure_column(connection, "outline_imports", "source_key", "TEXT")
+            connection.execute(
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_outline_imports_source_key
+                ON outline_imports(source_key)
+                WHERE source_key IS NOT NULL
                 """
             )
 
@@ -337,6 +514,14 @@ class TrpgStore:
             raise
         finally:
             connection.close()
+
+    @staticmethod
+    def _ensure_column(connection: sqlite3.Connection, table_name: str, column_name: str, column_sql: str) -> None:
+        rows = connection.execute(f"PRAGMA table_info({table_name})").fetchall()
+        existing_columns = {row["name"] for row in rows}
+        if column_name in existing_columns:
+            return
+        connection.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_sql}")
 
 
 def _row_to_scenario(row: sqlite3.Row) -> ScenarioRecord:

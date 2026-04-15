@@ -1,0 +1,1 @@
+"""AstrBot TRPG plugin package."""

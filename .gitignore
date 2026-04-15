@@ -1,0 +1,7 @@
+.idea/
+.venv/
+data/
+test_tmp/
+__pycache__/
+*.py[cod]
+*.sqlite3

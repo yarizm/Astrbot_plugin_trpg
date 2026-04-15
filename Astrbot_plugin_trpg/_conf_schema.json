@@ -21,5 +21,10 @@
     "description": "SQLite 数据库文件名，将保存在插件数据目录下。",
     "type": "string",
     "default": "trpg.sqlite3"
+  },
+  "bootstrap_builtin_scenarios": {
+    "description": "插件启动时是否自动初始化内置剧本包。开启后，首次启动会自动上架内置剧本，后续不会重复导入。",
+    "type": "bool",
+    "default": true
   }
 }
