@@ -165,37 +165,4 @@ Astrbot_plugin_trpg/
     └── builtin_scenarios.py
 ```
 
-## 开发说明
 
-### 编译检查
-
-```bash
-python -m compileall -q Astrbot_plugin_trpg
-```
-
-### 建议的本地检查
-
-如需增加代码风格检查和测试，可安装：
-
-```bash
-pip install ruff pytest
-```
-
-然后运行：
-
-```bash
-ruff check Astrbot_plugin_trpg
-pytest -q
-```
-
-## 注意事项
-
-- 管理命令依赖 `admin_user_ids`，请在启用插件后优先配置管理员。
-- 单次导入文本长度受 `max_import_chars` 限制，超长剧本建议拆分导入。
-- 群聊同一时间只能绑定一个剧本。如需更换，请先由管理员执行 `/trpg 重置当前剧本`。
-- 私聊单人跑团同一会话同一时间只能进行一个剧本。如需更换，请先执行 `/trpg 单人结束`。
-- 插件当前的单人跑团模式是轻量规则生成，不依赖外部 LLM。
-
-## License
-
-本仓库暂未声明许可证。如需公开分发，建议补充 `LICENSE` 文件。
