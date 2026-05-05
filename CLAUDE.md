@@ -24,19 +24,19 @@
 
 插件采用三层设计：**AstrBot 适配层 → 业务层 → 存储层**。
 
-- [main.py](Astrbot_plugin_trpg/main.py) — 插件入口。通过 `@filter.command_group` 和 `@llm_tool` 注册斜杠命令（`/trpg` 命令组）和 LLM 工具。负责权限校验（管理员专属命令、仅私聊/仅群聊）。单人跑团消息在 `on_all_message` 中拦截，通过 `tool_loop_agent` 调用 LLM 主导叙事。
+- [main.py](astrbot_plugin_trpg/main.py) — 插件入口。通过 `@filter.command_group` 和 `@llm_tool` 注册斜杠命令（`/trpg` 命令组）和 LLM 工具。负责权限校验（管理员专属命令、仅私聊/仅群聊）。单人跑团消息在 `on_all_message` 中拦截，通过 `tool_loop_agent` 调用 LLM 主导叙事。
 
-- [core/service.py](Astrbot_plugin_trpg/core/service.py) — `TrpgService` 编排所有业务逻辑：导入预备/消费、发布、群聊剧本绑定、LLM 驱动的单人会话生命周期。单人跑团通过 `advance_solo_session_llm()` 调用 AstrBot 的 `tool_loop_agent`，让 LLM 自由叙事并按需调用工具。会话结束时通过 `end_solo_session_with_summary()` 单独调用 LLM 生成总结。
+- [core/service.py](astrbot_plugin_trpg/core/service.py) — `TrpgService` 编排所有业务逻辑：导入预备/消费、发布、群聊剧本绑定、LLM 驱动的单人会话生命周期。单人跑团通过 `advance_solo_session_llm()` 调用 AstrBot 的 `tool_loop_agent`，让 LLM 自由叙事并按需调用工具。会话结束时通过 `end_solo_session_with_summary()` 单独调用 LLM 生成总结。
 
-- [core/store.py](Astrbot_plugin_trpg/core/store.py) — `TrpgStore` 管理 SQLite 持久化。五张表：`outline_imports`、`scenario_candidates`、`group_sessions`、`solo_sessions`、`session_history`。通过 `source_key` 实现内置剧本的幂等播种。支持剧本导出为 Markdown 文件。所有连接使用上下文管理器，出错时自动回滚。
+- [core/store.py](astrbot_plugin_trpg/core/store.py) — `TrpgStore` 管理 SQLite 持久化。五张表：`outline_imports`、`scenario_candidates`、`group_sessions`、`solo_sessions`、`session_history`。通过 `source_key` 实现内置剧本的幂等播种。支持剧本导出为 Markdown 文件。所有连接使用上下文管理器，出错时自动回滚。
 
-- [core/parser.py](Astrbot_plugin_trpg/core/parser.py) — 解析以 `## 剧本：标题` 为分隔符的 Markdown 大纲。提取 `### 简介/标签/推荐人数/开场设定` 各节。输入无效时抛出 `OutlineParseError`。
+- [core/parser.py](astrbot_plugin_trpg/core/parser.py) — 解析以 `## 剧本：标题` 为分隔符的 Markdown 大纲。提取 `### 简介/标签/推荐人数/开场设定` 各节。输入无效时抛出 `OutlineParseError`。
 
-- [core/solo_mode.py](Astrbot_plugin_trpg/core/solo_mode.py) — 纯函数模块，不依赖 `astrbot` 包。包含骰子投掷逻辑（`roll_dice`）、系统提示词构建（`build_system_prompt`）、总结 prompt 构建（`build_summary_prompt`）。可在测试中直接导入。
+- [core/solo_mode.py](astrbot_plugin_trpg/core/solo_mode.py) — 纯函数模块，不依赖 `astrbot` 包。包含骰子投掷逻辑（`roll_dice`）、系统提示词构建（`build_system_prompt`）、总结 prompt 构建（`build_summary_prompt`）。可在测试中直接导入。
 
-- [core/tools.py](Astrbot_plugin_trpg/core/tools.py) — 4 个 `FunctionTool` 子类，仅供运行时使用（依赖 `astrbot.core.agent.tool`）：`TrpgRollTool`（骰子）、`TrpgNotesTool`（记录板）、`TrpgProgressTool`（阶段进度）、`TrpgEndSessionTool`（结束会话）。通过 `build_solo_tools()` 工厂函数组装。在 `service.py` 中延迟导入，避免测试时的依赖问题。
+- [core/tools.py](astrbot_plugin_trpg/core/tools.py) — 4 个 `FunctionTool` 子类，仅供运行时使用（依赖 `astrbot.core.agent.tool`）：`TrpgRollTool`（骰子）、`TrpgNotesTool`（记录板）、`TrpgProgressTool`（阶段进度）、`TrpgEndSessionTool`（结束会话）。通过 `build_solo_tools()` 工厂函数组装。在 `service.py` 中延迟导入，避免测试时的依赖问题。
 
-- [core/builtin_scenarios.py](Astrbot_plugin_trpg/core/builtin_scenarios.py) — 包含 3 个内置剧本，以原始 Markdown 字符串常量存储。通过 `source_key` 幂等播种。
+- [core/builtin_scenarios.py](astrbot_plugin_trpg/core/builtin_scenarios.py) — 包含 3 个内置剧本，以原始 Markdown 字符串常量存储。通过 `source_key` 幂等播种。
 
 ## 关键模式
 
@@ -50,7 +50,7 @@
 
 ## 配置
 
-定义在 [_conf_schema.json](Astrbot_plugin_trpg/_conf_schema.json)。
+定义在 [_conf_schema.json](astrbot_plugin_trpg/_conf_schema.json)。
 
 | 配置项 | 类型 | 默认值 | 说明 |
 |--------|------|--------|------|
