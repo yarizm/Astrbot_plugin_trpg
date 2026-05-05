@@ -26,5 +26,20 @@
     "description": "插件启动时是否自动初始化内置剧本包。开启后，首次启动会自动上架内置剧本，后续不会重复导入。",
     "type": "bool",
     "default": true
+  },
+  "scenario_export_dir": {
+    "description": "剧本 Markdown 导出目录，相对于插件数据目录。",
+    "type": "string",
+    "default": "scenarios"
+  },
+  "solo_max_steps": {
+    "description": "单人跑团 LLM agent 每轮最大工具调用步数。",
+    "type": "int",
+    "default": 10
+  },
+  "solo_system_prompt_override": {
+    "description": "自定义单人跑团系统提示词（为空则使用内置默认）。",
+    "type": "string",
+    "default": ""
   }
 }

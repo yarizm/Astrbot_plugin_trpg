@@ -74,8 +74,25 @@ class SoloSessionView:
     scenario_opening_scene: str
     transcript_json: str
     turn_count: int
+    notes_json: str
+    current_stage: str
     created_at: str
     updated_at: str
+
+
+@dataclass(slots=True)
+class SessionHistoryRecord:
+    id: int
+    platform_name: str
+    session_id: str
+    scenario_id: int
+    user_id: str
+    turn_count: int
+    summary: str
+    notes_snapshot: str
+    final_stage: str
+    started_at: str
+    ended_at: str
 
 
 class TrpgStore:
@@ -345,10 +362,12 @@ class TrpgStore:
                         scenario_id,
                         transcript_json,
                         turn_count,
+                        notes_json,
+                        current_stage,
                         created_at,
                         updated_at
                     )
-                    VALUES (?, ?, ?, ?, ?, 0, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, 0, '[]', '开场', ?, ?)
                     """,
                     (
                         platform_name,
@@ -379,6 +398,8 @@ class TrpgStore:
                     ss.scenario_id,
                     ss.transcript_json,
                     ss.turn_count,
+                    ss.notes_json,
+                    ss.current_stage,
                     ss.created_at,
                     ss.updated_at,
                     sc.title AS scenario_title,
@@ -405,6 +426,8 @@ class TrpgStore:
             scenario_opening_scene=row["scenario_opening_scene"],
             transcript_json=row["transcript_json"],
             turn_count=row["turn_count"],
+            notes_json=row["notes_json"],
+            current_stage=row["current_stage"],
             created_at=row["created_at"],
             updated_at=row["updated_at"],
         )
@@ -438,6 +461,129 @@ class TrpgStore:
                 (platform_name, session_id),
             )
         return cursor.rowcount > 0
+
+    def update_solo_session_extra(
+        self,
+        platform_name: str,
+        session_id: str,
+        notes_json: str | None = None,
+        current_stage: str | None = None,
+    ) -> None:
+        updates = []
+        params: list[object] = []
+        if notes_json is not None:
+            updates.append("notes_json = ?")
+            params.append(notes_json)
+        if current_stage is not None:
+            updates.append("current_stage = ?")
+            params.append(current_stage)
+        if not updates:
+            return
+        updates.append("updated_at = ?")
+        params.append(_utc_now())
+        params.extend([platform_name, session_id])
+        with self._connect() as connection:
+            connection.execute(
+                f"UPDATE solo_sessions SET {', '.join(updates)} WHERE platform_name = ? AND session_id = ?",
+                params,
+            )
+
+    def create_session_history(
+        self,
+        platform_name: str,
+        session_id: str,
+        scenario_id: int,
+        user_id: str,
+        turn_count: int,
+        summary: str,
+        notes_snapshot: str,
+        final_stage: str,
+        started_at: str,
+    ) -> SessionHistoryRecord:
+        ended_at = _utc_now()
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """
+                INSERT INTO session_history (
+                    platform_name, session_id, scenario_id, user_id,
+                    turn_count, summary, notes_snapshot, final_stage,
+                    started_at, ended_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (platform_name, session_id, scenario_id, user_id,
+                 turn_count, summary, notes_snapshot, final_stage,
+                 started_at, ended_at),
+            )
+        return SessionHistoryRecord(
+            id=int(cursor.lastrowid),
+            platform_name=platform_name,
+            session_id=session_id,
+            scenario_id=scenario_id,
+            user_id=user_id,
+            turn_count=turn_count,
+            summary=summary,
+            notes_snapshot=notes_snapshot,
+            final_stage=final_stage,
+            started_at=started_at,
+            ended_at=ended_at,
+        )
+
+    def list_session_history(self, platform_name: str, session_id: str, limit: int = 10) -> list[SessionHistoryRecord]:
+        limit = max(1, limit)
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT id, platform_name, session_id, scenario_id, user_id,
+                       turn_count, summary, notes_snapshot, final_stage,
+                       started_at, ended_at
+                FROM session_history
+                WHERE platform_name = ? AND session_id = ?
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (platform_name, session_id, limit),
+            ).fetchall()
+        return [
+            SessionHistoryRecord(
+                id=row["id"],
+                platform_name=row["platform_name"],
+                session_id=row["session_id"],
+                scenario_id=row["scenario_id"],
+                user_id=row["user_id"],
+                turn_count=row["turn_count"],
+                summary=row["summary"],
+                notes_snapshot=row["notes_snapshot"],
+                final_stage=row["final_stage"],
+                started_at=row["started_at"],
+                ended_at=row["ended_at"],
+            )
+            for row in rows
+        ]
+
+    def export_scenario_markdown(self, scenario: ScenarioRecord, output_dir: Path) -> Path:
+        output_dir.mkdir(parents=True, exist_ok=True)
+        safe_title = scenario.title.replace("/", "_").replace("\\", "_").replace(":", "_")
+        filename = f"{scenario.id}_{safe_title}.md"
+        filepath = output_dir / filename
+
+        tags = " / ".join(scenario.tag_list) if scenario.tag_list else "无标签"
+        status_map = {"draft": "草稿", "published": "已发布", "archived": "已归档"}
+        status_label = status_map.get(scenario.status, scenario.status)
+
+        content = (
+            f"# {scenario.title}\n\n"
+            f"**标签**：{tags}\n"
+            f"**推荐人数**：{scenario.recommended_players or '未填写'}\n"
+            f"**状态**：{status_label}\n\n"
+            f"## 简介\n{scenario.summary or '暂无简介'}\n\n"
+        )
+        if scenario.opening_scene:
+            content += f"## 开场设定\n{scenario.opening_scene}\n\n"
+        content += f"## 剧本原文\n{scenario.raw_markdown}\n"
+
+        filepath.write_text(content, encoding="utf-8")
+        return filepath
 
     def _init_db(self) -> None:
         with self._connect() as connection:
@@ -486,14 +632,33 @@ class TrpgStore:
                     scenario_id INTEGER NOT NULL,
                     transcript_json TEXT NOT NULL DEFAULT '[]',
                     turn_count INTEGER NOT NULL DEFAULT 0,
+                    notes_json TEXT NOT NULL DEFAULT '[]',
+                    current_stage TEXT NOT NULL DEFAULT '开场',
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
                     UNIQUE(platform_name, session_id),
                     FOREIGN KEY(scenario_id) REFERENCES scenario_candidates(id)
                 );
+
+                CREATE TABLE IF NOT EXISTS session_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    platform_name TEXT NOT NULL,
+                    session_id TEXT NOT NULL,
+                    scenario_id INTEGER NOT NULL,
+                    user_id TEXT NOT NULL,
+                    turn_count INTEGER NOT NULL,
+                    summary TEXT NOT NULL,
+                    notes_snapshot TEXT NOT NULL DEFAULT '[]',
+                    final_stage TEXT NOT NULL DEFAULT '',
+                    started_at TEXT NOT NULL,
+                    ended_at TEXT NOT NULL,
+                    FOREIGN KEY(scenario_id) REFERENCES scenario_candidates(id)
+                );
                 """
             )
             self._ensure_column(connection, "outline_imports", "source_key", "TEXT")
+            self._ensure_column(connection, "solo_sessions", "notes_json", "TEXT NOT NULL DEFAULT '[]'")
+            self._ensure_column(connection, "solo_sessions", "current_stage", "TEXT NOT NULL DEFAULT '开场'")
             connection.execute(
                 """
                 CREATE UNIQUE INDEX IF NOT EXISTS idx_outline_imports_source_key

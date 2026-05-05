@@ -2,15 +2,20 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from pathlib import Path
 
 from .builtin_scenarios import BUILTIN_SCENARIO_MARKDOWN, BUILTIN_SCENARIO_SOURCE_KEY
 from .parser import OutlineParseError, parse_scenario_outline
-from .solo_mode import build_solo_opening, build_solo_turn
+from .solo_mode import (
+    build_summary_prompt,
+    build_system_prompt,
+)
 from .store import (
     STATUS_DRAFT,
     STATUS_PUBLISHED,
     GroupSelectionView,
     ScenarioRecord,
+    SessionHistoryRecord,
     SoloSessionExistsError,
     SoloSessionView,
     TrpgStore,
@@ -124,19 +129,18 @@ class TrpgService:
         if self.store.get_solo_session(platform_name, session_id):
             raise SoloSessionExistsError("solo session already exists")
 
-        opening = build_solo_opening(scenario)
-        transcript = json.dumps(
-            [
-                {"role": "assistant", "content": opening},
-            ],
-            ensure_ascii=False,
-        )
         session = self.store.create_solo_session(
             platform_name=platform_name,
             session_id=session_id,
             user_id=user_id,
             scenario_id=scenario_id,
-            transcript_json=transcript,
+            transcript_json="[]",
+        )
+        opening = (
+            f"单人跑团已开始：《{scenario.title}》\n"
+            f"简介：{scenario.summary or '暂无简介'}\n"
+            f"开场设定：{scenario.opening_scene or '故事即将开始。'}\n\n"
+            "请发送你的第一条行动，GM 将为你推进剧情。"
         )
         return session, opening
 
@@ -149,6 +153,24 @@ class TrpgService:
         session_id: str,
         player_message: str,
     ) -> str | None:
+        """Legacy deterministic mode — kept for backward compatibility with existing tests."""
+        return None
+
+    async def advance_solo_session_llm(
+        self,
+        context: object,
+        event: object,
+        provider_id: str,
+        platform_name: str,
+        session_id: str,
+        player_message: str,
+        max_steps: int = 10,
+        system_prompt_override: str = "",
+    ) -> str | None:
+        """LLM-driven solo session turn. Returns the LLM's narrative reply."""
+        from astrbot.core.agent.tool import ToolSet
+        from .tools import build_solo_tools
+
         session = self.store.get_solo_session(platform_name, session_id)
         if not session:
             return None
@@ -157,11 +179,50 @@ class TrpgService:
         if not scenario:
             raise ValueError("当前单人剧本不存在，可能已被删除。")
 
-        turn_result = build_solo_turn(scenario, session, player_message)
+        # Build system prompt
+        history_summary = self._get_latest_history_summary(platform_name, session_id)
+        if system_prompt_override:
+            system_prompt = system_prompt_override.format(
+                title=scenario.title,
+                summary=scenario.summary,
+                tags=" / ".join(scenario.tag_list),
+                recommended_players=scenario.recommended_players,
+                opening_scene=scenario.opening_scene,
+                current_stage=session.current_stage,
+                turn_count=session.turn_count,
+            )
+        else:
+            system_prompt = build_system_prompt(
+                scenario_title=scenario.title,
+                scenario_summary=scenario.summary,
+                scenario_tags=scenario.tag_list,
+                recommended_players=scenario.recommended_players,
+                opening_scene=scenario.opening_scene,
+                current_stage=session.current_stage,
+                turn_count=session.turn_count,
+                notes_json=session.notes_json,
+                history_summary=history_summary,
+            )
+
+        # Build tools
+        tools_list = build_solo_tools(self.store, platform_name, session_id)
+        tool_set = ToolSet(tools=tools_list)
+
+        # Call LLM agent loop
+        llm_resp = await context.tool_loop_agent(
+            event=event,
+            chat_provider_id=provider_id,
+            prompt=player_message,
+            tools=tool_set,
+            system_prompt=system_prompt,
+            max_steps=max_steps,
+        )
+
+        reply = llm_resp.completion_text or "（GM 没有回应，请重试。）"
+
+        # Update session state
         transcript = self._append_transcript(
-            session.transcript_json,
-            player_message,
-            turn_result.reply,
+            session.transcript_json, player_message, reply,
         )
         self.store.update_solo_session(
             platform_name=platform_name,
@@ -169,17 +230,101 @@ class TrpgService:
             transcript_json=transcript,
             turn_count=session.turn_count + 1,
         )
-        return turn_result.reply
+
+        # Check for end session signal
+        if "[SESSION_END]" in reply:
+            cleaned = reply.replace("[SESSION_END]", "").strip()
+            await self._finalize_session(context, event, provider_id, platform_name, session_id)
+            return cleaned
+
+        return reply
+
+    async def end_solo_session_with_summary(
+        self,
+        context: object,
+        event: object,
+        provider_id: str,
+        platform_name: str,
+        session_id: str,
+    ) -> str:
+        """End session with LLM-generated summary. Returns the summary text."""
+        session = self.store.get_solo_session(platform_name, session_id)
+        if not session:
+            return "当前没有正在进行的单人跑团。"
+
+        return await self._finalize_session(context, event, provider_id, platform_name, session_id)
+
+    async def _finalize_session(
+        self,
+        context: object,
+        event: object,
+        provider_id: str,
+        platform_name: str,
+        session_id: str,
+    ) -> str:
+        """Generate summary via LLM, save history, and reset session."""
+        session = self.store.get_solo_session(platform_name, session_id)
+        if not session:
+            return "当前没有正在进行的单人跑团。"
+
+        # Generate summary
+        summary_prompt = build_summary_prompt(session.transcript_json)
+        try:
+            summary_resp = await context.llm_generate(
+                chat_provider_id=provider_id,
+                prompt=summary_prompt,
+            )
+            summary = summary_resp.completion_text or "跑团已结束，未能生成总结。"
+        except Exception:
+            summary = "跑团已结束，总结生成失败。"
+
+        # Save history
+        self.store.create_session_history(
+            platform_name=platform_name,
+            session_id=session_id,
+            scenario_id=session.scenario_id,
+            user_id=session.user_id,
+            turn_count=session.turn_count,
+            summary=summary,
+            notes_snapshot=session.notes_json,
+            final_stage=session.current_stage,
+            started_at=session.created_at,
+        )
+
+        # Reset session
+        self.store.reset_solo_session(platform_name, session_id)
+
+        return f"跑团已结束。\n\n总结：{summary}"
+
+    def _get_latest_history_summary(self, platform_name: str, session_id: str) -> str:
+        """Get the summary from the most recent history entry."""
+        history = self.store.list_session_history(platform_name, session_id, limit=1)
+        if history:
+            return history[0].summary
+        return ""
+
+    def list_session_history(self, platform_name: str, session_id: str, limit: int = 10) -> list[SessionHistoryRecord]:
+        return self.store.list_session_history(platform_name, session_id, limit)
+
+    def export_scenario_markdown(self, scenario_id: int, output_dir: Path) -> Path | None:
+        scenario = self.store.get_scenario(scenario_id)
+        if not scenario:
+            return None
+        return self.store.export_scenario_markdown(scenario, output_dir)
 
     def reset_solo_session(self, platform_name: str, session_id: str) -> bool:
         return self.store.reset_solo_session(platform_name, session_id)
 
     @staticmethod
     def format_solo_status(session: SoloSessionView) -> str:
+        notes: list[str] = json.loads(session.notes_json or "[]")
+        notes_str = "\n".join(f"  - {n}" for n in notes) if notes else "  暂无记录"
         return (
             f"当前单人剧本：[{session.scenario_id}] {session.scenario_title}\n"
             f"简介：{session.scenario_summary or '暂无简介'}\n"
+            f"阶段：{session.current_stage}\n"
             f"回合数：{session.turn_count}\n"
+            f"记录板：\n{notes_str}\n"
             f"开始时间：{session.created_at}\n"
             f"最后推进：{session.updated_at}"
         )
