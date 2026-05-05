@@ -180,7 +180,11 @@ class TrpgService:
             raise ValueError("当前单人剧本不存在，可能已被删除。")
 
         # Build system prompt
-        history_summary = self._get_latest_history_summary(platform_name, session_id)
+        history_summary = self._get_latest_history_summary(
+            platform_name,
+            session_id,
+            session.scenario_id,
+        )
         if system_prompt_override:
             system_prompt = system_prompt_override.format(
                 title=scenario.title,
@@ -234,8 +238,14 @@ class TrpgService:
         # Check for end session signal
         if "[SESSION_END]" in reply:
             cleaned = reply.replace("[SESSION_END]", "").strip()
-            await self._finalize_session(context, event, provider_id, platform_name, session_id)
-            return cleaned
+            final_message = await self._finalize_session(
+                context,
+                event,
+                provider_id,
+                platform_name,
+                session_id,
+            )
+            return self._build_session_end_reply(cleaned, final_message)
 
         return reply
 
@@ -296,9 +306,19 @@ class TrpgService:
 
         return f"跑团已结束。\n\n总结：{summary}"
 
-    def _get_latest_history_summary(self, platform_name: str, session_id: str) -> str:
-        """Get the summary from the most recent history entry."""
-        history = self.store.list_session_history(platform_name, session_id, limit=1)
+    def _get_latest_history_summary(
+        self,
+        platform_name: str,
+        session_id: str,
+        scenario_id: int,
+    ) -> str:
+        """Get the summary from the most recent history entry for the same scenario."""
+        history = self.store.list_session_history(
+            platform_name,
+            session_id,
+            limit=1,
+            scenario_id=scenario_id,
+        )
         if history:
             return history[0].summary
         return ""
@@ -367,3 +387,9 @@ class TrpgService:
         history.append({"role": "assistant", "content": assistant_message})
         trimmed = history[-limit:]
         return json.dumps(trimmed, ensure_ascii=False)
+
+    @staticmethod
+    def _build_session_end_reply(cleaned_reply: str, final_message: str) -> str:
+        if not cleaned_reply:
+            return final_message
+        return f"{cleaned_reply}\n\n{final_message}"

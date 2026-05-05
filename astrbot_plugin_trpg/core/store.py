@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import sqlite3
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -529,21 +530,32 @@ class TrpgStore:
             ended_at=ended_at,
         )
 
-    def list_session_history(self, platform_name: str, session_id: str, limit: int = 10) -> list[SessionHistoryRecord]:
+    def list_session_history(
+        self,
+        platform_name: str,
+        session_id: str,
+        limit: int = 10,
+        scenario_id: int | None = None,
+    ) -> list[SessionHistoryRecord]:
         limit = max(1, limit)
-        with self._connect() as connection:
-            rows = connection.execute(
-                """
+        query = """
                 SELECT id, platform_name, session_id, scenario_id, user_id,
                        turn_count, summary, notes_snapshot, final_stage,
                        started_at, ended_at
                 FROM session_history
                 WHERE platform_name = ? AND session_id = ?
+                """
+        params: list[object] = [platform_name, session_id]
+        if scenario_id is not None:
+            query += " AND scenario_id = ?"
+            params.append(scenario_id)
+        query += """
                 ORDER BY id DESC
                 LIMIT ?
-                """,
-                (platform_name, session_id, limit),
-            ).fetchall()
+                """
+        params.append(limit)
+        with self._connect() as connection:
+            rows = connection.execute(query, params).fetchall()
         return [
             SessionHistoryRecord(
                 id=row["id"],
@@ -563,7 +575,7 @@ class TrpgStore:
 
     def export_scenario_markdown(self, scenario: ScenarioRecord, output_dir: Path) -> Path:
         output_dir.mkdir(parents=True, exist_ok=True)
-        safe_title = scenario.title.replace("/", "_").replace("\\", "_").replace(":", "_")
+        safe_title = _sanitize_filename_component(scenario.title)
         filename = f"{scenario.id}_{safe_title}.md"
         filepath = output_dir / filename
 
@@ -707,3 +719,11 @@ def _row_to_scenario(row: sqlite3.Row) -> ScenarioRecord:
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+_INVALID_FILENAME_CHARS_RE = re.compile(r'[<>:"/\\\\|?*]+')
+
+
+def _sanitize_filename_component(title: str) -> str:
+    sanitized = _INVALID_FILENAME_CHARS_RE.sub("_", title).strip().rstrip(". ")
+    return sanitized or "scenario"
