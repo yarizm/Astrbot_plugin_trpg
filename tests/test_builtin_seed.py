@@ -25,6 +25,13 @@ class BuiltinScenarioSeedTest(unittest.TestCase):
 
             published = service.list_published(limit=10)
             self.assertEqual(len(published), 3)
+            by_id = service.resolve_published_scenario(str(published[0].id))
+            self.assertIsNotNone(by_id)
+            self.assertEqual(by_id.id, published[0].id)
+
+            by_title = service.resolve_published_scenario(published[0].title)
+            self.assertIsNotNone(by_title)
+            self.assertEqual(by_title.id, published[0].id)
 
             created_again = service.seed_builtin_scenarios(
                 imported_by="tester",

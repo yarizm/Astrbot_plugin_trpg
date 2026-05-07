@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from astrbot.api import AstrBotConfig, llm_tool, logger
+from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import AstrMessageEvent, filter
+from astrbot.api.provider import ProviderRequest
 from astrbot.api.star import Context, Star, register
 from astrbot.core.utils.astrbot_path import get_astrbot_data_path
 
@@ -29,6 +30,7 @@ class TrpgPlugin(Star):
         self.config = config or {}
         self.store = TrpgStore(self._resolve_db_path())
         self.service = TrpgService(self.store)
+        self._last_session_summaries: dict[tuple[str, str, str], str] = {}
         self._bootstrap_builtin_scenarios()
 
     @filter.command_group("trpg")
@@ -199,13 +201,15 @@ class TrpgPlugin(Star):
             return
 
         try:
-            provider_id = await self.context.get_current_chat_provider_id(umo=event.unified_msg_origin)
+            provider_id = await self._resolve_solo_provider_id(event)
+            fallback_id = self._solo_fallback_provider_id()
             result = await self.service.end_solo_session_with_summary(
                 context=self.context,
                 event=event,
                 provider_id=provider_id,
                 platform_name=event.get_platform_name(),
                 session_id=event.get_session_id(),
+                fallback_provider_id=fallback_id,
             )
         except Exception as exc:  # pragma: no cover
             logger.exception("TRPG solo session end failed: %s", exc)
@@ -218,63 +222,77 @@ class TrpgPlugin(Star):
             event.get_platform_name(),
             event.get_session_id(),
         )
+        self._remember_session_summary(event, result)
         yield event.plain_result(result)
 
-    @llm_tool(name="trpg_list_scenarios")
+    @filter.on_llm_request()
+    async def inject_trpg_context(self, event: AstrMessageEvent, req: ProviderRequest):
+        summary_key = self._session_summary_key(event)
+        summary = self._last_session_summaries.pop(summary_key, None)
+        if not summary:
+            return
+        req.system_prompt = (
+            f"{req.system_prompt or ''}\n\n"
+            f"[跑团上下文]\n"
+            f"该用户刚刚完成了一局单人跑团，以下是跑团总结：\n"
+            f"{summary}\n"
+            f"请在回复中自然地提及这段经历，让用户感受到连续性。\n"
+        )
+
+    @filter.llm_tool(name="trpg_list_scenarios")
     async def llm_list_scenarios(self, event: AstrMessageEvent):
-        """查看当前可选剧本列表。
-        适用意图：用户想看有哪些跑团剧本、想选本、想知道现在能玩什么。
-        常见说法：有什么剧本、给我看看可选团本、我能开哪个本、列一下跑团选项。
-        当用户还没决定玩哪一个时，优先调用这个工具。
+        """List available TRPG scenarios.
+        Use when the user wants to see available scenarios, choose a scenario, or asks what scenarios are available.
+        Common requests: 有什么剧本, 剧本列表, 给我看看可选团本, 我能开哪个本, 列一下跑团选项.
         """
         return self._tool_list_scenarios()
 
-    @llm_tool(name="trpg_select_group_scenario")
-    async def llm_select_group_scenario(self, event: AstrMessageEvent, scenario_id: int):
-        """在群聊中把某个剧本绑定为当前团的剧本。
-        适用意图：用户明确要在群里开某个本、选定当前群跑哪个剧本。
-        常见说法：这个群就跑 2 号本、帮我们开雾港回声、当前团选 1 号剧本。
-        仅在群聊里调用；如果是私聊单人模式，不要调用这个工具。
+    @filter.llm_tool(name="trpg_select_group_scenario")
+    async def llm_select_group_scenario(self, event: AstrMessageEvent, scenario_ref: str):
+        """Bind a scenario to the current group chat.
+        Use when the user wants to select a scenario for the group to play.
+        Common requests: 这个群就跑 2 号本, 帮我们开雾港回声, 当前团选 1 号剧本.
+        Only use in group chat, not in private chat.
         Args:
-            scenario_id(number): 要绑定的剧本编号。
+            scenario_ref(string): Scenario ID or title, e.g. 1 or 雾港回声.
         """
-        return self._tool_select_group_scenario(event, scenario_id)
+        return self._tool_select_group_scenario(event, scenario_ref)
 
-    @llm_tool(name="trpg_view_group_scenario")
+    @filter.llm_tool(name="trpg_view_group_scenario")
     async def llm_view_group_scenario(self, event: AstrMessageEvent):
-        """查看当前群聊已经绑定的剧本。
-        适用意图：用户想知道这个群现在跑的是哪个本、当前团本是什么、选本结果是什么。
-        常见说法：我们现在跑哪个本、当前剧本是什么、看一下这个群的团本。
-        仅在群聊里调用。
+        """View the currently bound scenario for this group chat.
+        Use when the user wants to know which scenario is currently selected for the group.
+        Common requests: 我们现在跑哪个本, 当前剧本是什么, 看一下这个群的团本.
+        Only use in group chat.
         """
         return self._tool_view_group_scenario(event)
 
-    @llm_tool(name="trpg_start_solo_session")
-    async def llm_start_solo_session(self, event: AstrMessageEvent, scenario_id: int):
-        """在私聊中开启单人跑团模式。
-        适用意图：用户想和机器人私聊跑单人团、开始单人冒险、在私聊里开某个剧本。
-        常见说法：我想单人跑团、私聊带我跑 1 号本、帮我开一个单人剧本。
-        仅在私聊中调用；如果用户在群里说这类话，不要调用。
+    @filter.llm_tool(name="trpg_start_solo_session")
+    async def llm_start_solo_session(self, event: AstrMessageEvent, scenario_ref: str):
+        """Start a solo TRPG session in private chat.
+        Use when the user wants to play a solo TRPG adventure with the bot as GM.
+        Common requests: 我想单人跑团, 私聊带我跑 1 号本, 帮我开一个单人剧本.
+        Only use in private chat, not in group chat.
         Args:
-            scenario_id(number): 要开始的剧本编号。
+            scenario_ref(string): Scenario ID or title, e.g. 1 or 雾港回声.
         """
-        return self._tool_start_solo_session(event, scenario_id)
+        return self._tool_start_solo_session(event, scenario_ref)
 
-    @llm_tool(name="trpg_view_solo_status")
+    @filter.llm_tool(name="trpg_view_solo_status")
     async def llm_view_solo_status(self, event: AstrMessageEvent):
-        """查看当前私聊单人跑团状态。
-        适用意图：用户想知道自己单人团跑到哪了、当前单人剧本是什么、还在不在进行中。
-        常见说法：我现在跑到哪了、单人团状态、看看我当前的剧本。
-        仅在私聊中调用。
+        """View current solo TRPG session status.
+        Use when the user wants to check their solo session progress, current scenario, or session state.
+        Common requests: 我现在跑到哪了, 单人团状态, 看看我当前的剧本.
+        Only use in private chat.
         """
         return self._tool_view_solo_status(event)
 
-    @llm_tool(name="trpg_end_solo_session")
+    @filter.llm_tool(name="trpg_end_solo_session")
     async def llm_end_solo_session(self, event: AstrMessageEvent):
-        """结束当前私聊单人跑团，生成跑团总结。
-        适用意图：用户想结束当前单人冒险、重开单人团、清空现在的单人会话。
-        常见说法：结束这局、单人模式先停掉、我要换个本重开。
-        仅在私聊中调用。
+        """End the current solo TRPG session and generate a summary.
+        Use when the user wants to end their solo adventure, restart, or clear the current solo session.
+        Common requests: 结束这局, 单人模式先停掉, 我要换个本重开.
+        Only use in private chat.
         """
         return await self._tool_end_solo_session(event)
 
@@ -443,7 +461,8 @@ class TrpgPlugin(Star):
                 return
 
             try:
-                provider_id = await self.context.get_current_chat_provider_id(umo=event.unified_msg_origin)
+                provider_id = await self._resolve_solo_provider_id(event)
+                fallback_id = self._solo_fallback_provider_id()
                 solo_reply = await self.service.advance_solo_session_llm(
                     context=self.context,
                     event=event,
@@ -453,6 +472,7 @@ class TrpgPlugin(Star):
                     player_message=message_text,
                     max_steps=self._solo_max_steps(),
                     system_prompt_override=self._solo_system_prompt_override(),
+                    fallback_provider_id=fallback_id,
                 )
             except Exception as exc:  # pragma: no cover
                 logger.exception("TRPG solo mode failed unexpectedly: %s", exc)
@@ -463,6 +483,7 @@ class TrpgPlugin(Star):
             if solo_reply is None:
                 return
 
+            self._remember_session_summary(event, solo_reply)
             event.stop_event()
             yield event.plain_result(solo_reply)
             return
@@ -486,7 +507,7 @@ class TrpgPlugin(Star):
             return "当前还没有已发布的剧本。请联系管理员先初始化内置剧本或导入并发布。"
         return self.service.format_scenario_list("可选剧本列表", scenarios)
 
-    def _tool_select_group_scenario(self, event: AstrMessageEvent, scenario_id: int) -> str:
+    def _tool_select_group_scenario(self, event: AstrMessageEvent, scenario_ref: str | int) -> str:
         group_error = self._group_only_error(event)
         if group_error:
             return group_error
@@ -498,11 +519,15 @@ class TrpgPlugin(Star):
                 "如果需要更换，请先让管理员重置当前剧本。"
             )
 
+        scenario_to_select = self.service.resolve_published_scenario(scenario_ref)
+        if not scenario_to_select:
+            return f"未找到可用剧本：{scenario_ref}。可以先查看可选剧本列表。"
+
         try:
             scenario = self.service.select_group_scenario(
                 platform_name=event.get_platform_name(),
                 session_id=event.message_obj.session_id,
-                scenario_id=scenario_id,
+                scenario_id=scenario_to_select.id,
                 selected_by=event.get_sender_id(),
             )
         except ValueError as exc:
@@ -527,17 +552,21 @@ class TrpgPlugin(Star):
             f"选择时间：{selection.selected_at}"
         )
 
-    def _tool_start_solo_session(self, event: AstrMessageEvent, scenario_id: int) -> str:
+    def _tool_start_solo_session(self, event: AstrMessageEvent, scenario_ref: str | int) -> str:
         private_error = self._private_only_error(event)
         if private_error:
             return private_error
+
+        scenario_to_start = self.service.resolve_published_scenario(scenario_ref)
+        if not scenario_to_start:
+            return f"未找到可用剧本：{scenario_ref}。可以先查看可选剧本列表。"
 
         try:
             _, opening = self.service.start_solo_session(
                 platform_name=event.get_platform_name(),
                 session_id=event.get_session_id(),
                 user_id=event.get_sender_id(),
-                scenario_id=scenario_id,
+                scenario_id=scenario_to_start.id,
             )
         except ValueError as exc:
             return str(exc)
@@ -572,18 +601,23 @@ class TrpgPlugin(Star):
             return "当前没有正在进行的单人跑团，无需结束。"
 
         try:
-            provider_id = await self.context.get_current_chat_provider_id(umo=event.unified_msg_origin)
-            return await self.service.end_solo_session_with_summary(
+            provider_id = await self._resolve_solo_provider_id(event)
+            fallback_id = self._solo_fallback_provider_id()
+            result = await self.service.end_solo_session_with_summary(
                 context=self.context,
                 event=event,
                 provider_id=provider_id,
                 platform_name=event.get_platform_name(),
                 session_id=event.get_session_id(),
+                fallback_provider_id=fallback_id,
             )
         except Exception as exc:  # pragma: no cover
             logger.exception("TRPG solo session end tool failed: %s", exc)
             self.service.reset_solo_session(event.get_platform_name(), event.get_session_id())
             return "生成总结时出错，已强制结束。你可以重新选择剧本再开始。"
+
+        self._remember_session_summary(event, result)
+        return result
 
     def _bootstrap_builtin_scenarios(self) -> None:
         if not self._bootstrap_builtin_enabled():
@@ -642,6 +676,35 @@ class TrpgPlugin(Star):
 
     def _solo_system_prompt_override(self) -> str:
         return str(self.config.get("solo_system_prompt_override", "") or "").strip()
+
+    def _solo_provider_id(self) -> str:
+        return str(self.config.get("solo_provider_id", "") or "").strip()
+
+    def _solo_fallback_provider_id(self) -> str:
+        return str(self.config.get("solo_fallback_provider_id", "") or "").strip()
+
+    async def _resolve_solo_provider_id(self, event: AstrMessageEvent) -> str:
+        configured = self._solo_provider_id()
+        if configured:
+            return configured
+        return await self.context.get_current_chat_provider_id(umo=event.unified_msg_origin)
+
+    @staticmethod
+    def _session_summary_key(event: AstrMessageEvent) -> tuple[str, str, str]:
+        return (
+            event.get_platform_name(),
+            event.get_session_id(),
+            event.get_sender_id(),
+        )
+
+    def _remember_session_summary(self, event: AstrMessageEvent, result: str) -> None:
+        marker = "总结："
+        if marker not in result:
+            return
+        summary = result.split(marker, 1)[1].strip()
+        if not summary:
+            return
+        self._last_session_summaries[self._session_summary_key(event)] = summary
 
     def _scenario_export_dir(self) -> Path:
         plugin_data_dir = Path(get_astrbot_data_path()) / "plugin_data" / PLUGIN_NAME

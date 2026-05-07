@@ -57,6 +57,21 @@
 
 默认配置下，插件首次启动会自动把这 3 个内置剧本写入数据库并直接发布。如果关闭了自动初始化，管理员可手动执行 `/trpg 初始化内置剧本`。
 
+## 自然语言调用工具
+
+插件通过 `@filter.llm_tool` 注册了 6 个工具，AstrBot 的基础 LLM 可通过自然语言自动调用：
+
+| 工具 | 触发示例 |
+|------|---------|
+| `trpg_list_scenarios` | "有什么剧本"、"给我看看可选团本" |
+| `trpg_select_group_scenario` | "这个群就跑 2 号本"、"帮我们开雾港回声" |
+| `trpg_view_group_scenario` | "我们现在跑哪个本"、"当前剧本是什么" |
+| `trpg_start_solo_session` | "我想单人跑团"、"私聊带我跑 1 号本" |
+| `trpg_view_solo_status` | "我现在跑到哪了"、"单人团状态" |
+| `trpg_end_solo_session` | "结束这局"、"我要换个本重开" |
+
+支持按剧本编号或标题匹配（如"雾港回声"或"1"）。
+
 ## 单人跑团模式
 
 单人跑团由 LLM 主导，玩家在私聊中直接发送自然语言行动即可。
@@ -91,6 +106,9 @@
 1. LLM 自动生成一段 100 字以内的跑团总结
 2. 总结存入历史记录表
 3. 当前会话数据清空
+4. 总结自动同步到 AstrBot 基础 LLM 的上下文
+
+**上下文同步**：跑团结束后，用户发的第一条普通消息会触发基础 LLM 自动获知跑团经历。基础 LLM 会在回复中自然提及刚结束的跑团，避免沟通割裂。
 
 下次开同一剧本时，历史摘要会自动注入系统提示词，让 LLM 了解上一局的情况。
 
@@ -150,6 +168,8 @@
 | `scenario_export_dir` | string | scenarios | 剧本 MD 导出目录 |
 | `solo_max_steps` | int | 10 | 单人跑团每轮最大工具调用步数 |
 | `solo_system_prompt_override` | string | "" | 自定义单人跑团系统提示词 |
+| `solo_provider_id` | string | "" | 单人跑团使用的 LLM 模型 Provider ID，为空则使用 AstrBot 当前会话的默认模型 |
+| `solo_fallback_provider_id` | string | "" | 单人跑团备用 LLM 模型 Provider ID，主模型失败时自动切换，为空则不使用备用模型 |
 
 ## 开发验证
 

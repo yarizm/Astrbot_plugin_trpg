@@ -24,7 +24,7 @@
 
 插件采用三层设计：**AstrBot 适配层 → 业务层 → 存储层**。
 
-- [main.py](astrbot_plugin_trpg/main.py) — 插件入口。通过 `@filter.command_group` 和 `@llm_tool` 注册斜杠命令（`/trpg` 命令组）和 LLM 工具。负责权限校验（管理员专属命令、仅私聊/仅群聊）。单人跑团消息在 `on_all_message` 中拦截，通过 `tool_loop_agent` 调用 LLM 主导叙事。
+- [main.py](astrbot_plugin_trpg/main.py) — 插件入口。通过 `@filter.command_group` 和 `@filter.llm_tool` 注册斜杠命令（`/trpg` 命令组）和 LLM 工具。负责权限校验（管理员专属命令、仅私聊/仅群聊）。单人跑团消息在 `on_all_message` 中拦截，通过 `tool_loop_agent` 调用 LLM 主导叙事。跑团结束时通过 `@filter.on_llm_request` 将总结注入基础 LLM 上下文。
 
 - [core/service.py](astrbot_plugin_trpg/core/service.py) — `TrpgService` 编排所有业务逻辑：导入预备/消费、发布、群聊剧本绑定、LLM 驱动的单人会话生命周期。单人跑团通过 `advance_solo_session_llm()` 调用 AstrBot 的 `tool_loop_agent`，让 LLM 自由叙事并按需调用工具。会话结束时通过 `end_solo_session_with_summary()` 单独调用 LLM 生成总结。
 

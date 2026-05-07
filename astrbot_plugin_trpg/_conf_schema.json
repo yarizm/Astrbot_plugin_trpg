@@ -41,5 +41,15 @@
     "description": "自定义单人跑团系统提示词（为空则使用内置默认）。",
     "type": "string",
     "default": ""
+  },
+  "solo_provider_id": {
+    "description": "单人跑团使用的 LLM 模型 Provider ID。为空则使用 AstrBot 当前会话的默认模型。",
+    "type": "string",
+    "default": ""
+  },
+  "solo_fallback_provider_id": {
+    "description": "单人跑团备用 LLM 模型 Provider ID。当主模型调用失败时自动切换。为空则不使用备用模型。",
+    "type": "string",
+    "default": ""
   }
 }

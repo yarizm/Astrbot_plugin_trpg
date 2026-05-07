@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 import json
+import logging
+import re
 from dataclasses import dataclass
 from pathlib import Path
+
+logger = logging.getLogger("astrbot")
 
 from .builtin_scenarios import BUILTIN_SCENARIO_MARKDOWN, BUILTIN_SCENARIO_SOURCE_KEY
 from .parser import OutlineParseError, parse_scenario_outline
@@ -82,6 +86,37 @@ class TrpgService:
 
     def publish_scenario(self, scenario_id: int) -> ScenarioRecord | None:
         return self.store.publish_scenario(scenario_id)
+
+    def resolve_published_scenario(self, scenario_ref: str | int) -> ScenarioRecord | None:
+        if isinstance(scenario_ref, int):
+            scenario = self.store.get_scenario(scenario_ref)
+            if scenario and scenario.status == STATUS_PUBLISHED:
+                return scenario
+            return None
+
+        ref = str(scenario_ref or "").strip()
+        if not ref:
+            return None
+
+        digit_match = re.fullmatch(r"\s*(\d+)\s*(?:号|號|#)?\s*", ref)
+        if digit_match:
+            return self.resolve_published_scenario(int(digit_match.group(1)))
+
+        normalized_ref = _normalize_scenario_ref(ref)
+        exact_matches: list[ScenarioRecord] = []
+        partial_matches: list[ScenarioRecord] = []
+        for scenario in self.list_published(limit=1000):
+            normalized_title = _normalize_scenario_ref(scenario.title)
+            if normalized_title == normalized_ref:
+                exact_matches.append(scenario)
+            elif normalized_ref in normalized_title or normalized_title in normalized_ref:
+                partial_matches.append(scenario)
+
+        if len(exact_matches) == 1:
+            return exact_matches[0]
+        if not exact_matches and len(partial_matches) == 1:
+            return partial_matches[0]
+        return None
 
     def seed_builtin_scenarios(self, imported_by: str, imported_session: str) -> list[ScenarioRecord]:
         if self.store.has_import_source(BUILTIN_SCENARIO_SOURCE_KEY):
@@ -166,6 +201,7 @@ class TrpgService:
         player_message: str,
         max_steps: int = 10,
         system_prompt_override: str = "",
+        fallback_provider_id: str = "",
     ) -> str | None:
         """LLM-driven solo session turn. Returns the LLM's narrative reply."""
         from astrbot.core.agent.tool import ToolSet
@@ -212,15 +248,43 @@ class TrpgService:
         tools_list = build_solo_tools(self.store, platform_name, session_id)
         tool_set = ToolSet(tools=tools_list)
 
-        # Call LLM agent loop
-        llm_resp = await context.tool_loop_agent(
-            event=event,
-            chat_provider_id=provider_id,
-            prompt=player_message,
-            tools=tool_set,
-            system_prompt=system_prompt,
-            max_steps=max_steps,
-        )
+        # Build conversation history from transcript
+        contexts = []
+        try:
+            from astrbot.core.agent.message import Message as AgentMessage
+            history = json.loads(session.transcript_json or "[]")
+            if isinstance(history, list):
+                for msg in history:
+                    if isinstance(msg, dict) and msg.get("role") in ("user", "assistant"):
+                        contexts.append(AgentMessage(role=msg["role"], content=msg.get("content", "")))
+        except (ImportError, json.JSONDecodeError, Exception):
+            contexts = []
+
+        # Call LLM agent loop (with fallback support)
+        try:
+            llm_resp = await context.tool_loop_agent(
+                event=event,
+                chat_provider_id=provider_id,
+                prompt=player_message,
+                contexts=contexts if contexts else None,
+                tools=tool_set,
+                system_prompt=system_prompt,
+                max_steps=max_steps,
+            )
+        except Exception as primary_exc:
+            if not fallback_provider_id:
+                raise
+            logger.warning("TRPG primary provider %s failed (%s), trying fallback %s",
+                           provider_id, primary_exc, fallback_provider_id)
+            llm_resp = await context.tool_loop_agent(
+                event=event,
+                chat_provider_id=fallback_provider_id,
+                prompt=player_message,
+                contexts=contexts if contexts else None,
+                tools=tool_set,
+                system_prompt=system_prompt,
+                max_steps=max_steps,
+            )
 
         reply = llm_resp.completion_text or "（GM 没有回应，请重试。）"
 
@@ -244,6 +308,7 @@ class TrpgService:
                 provider_id,
                 platform_name,
                 session_id,
+                fallback_provider_id,
             )
             return self._build_session_end_reply(cleaned, final_message)
 
@@ -256,13 +321,14 @@ class TrpgService:
         provider_id: str,
         platform_name: str,
         session_id: str,
+        fallback_provider_id: str = "",
     ) -> str:
         """End session with LLM-generated summary. Returns the summary text."""
         session = self.store.get_solo_session(platform_name, session_id)
         if not session:
             return "当前没有正在进行的单人跑团。"
 
-        return await self._finalize_session(context, event, provider_id, platform_name, session_id)
+        return await self._finalize_session(context, event, provider_id, platform_name, session_id, fallback_provider_id)
 
     async def _finalize_session(
         self,
@@ -271,13 +337,14 @@ class TrpgService:
         provider_id: str,
         platform_name: str,
         session_id: str,
+        fallback_provider_id: str = "",
     ) -> str:
         """Generate summary via LLM, save history, and reset session."""
         session = self.store.get_solo_session(platform_name, session_id)
         if not session:
             return "当前没有正在进行的单人跑团。"
 
-        # Generate summary
+        # Generate summary (with fallback)
         summary_prompt = build_summary_prompt(session.transcript_json)
         try:
             summary_resp = await context.llm_generate(
@@ -285,8 +352,20 @@ class TrpgService:
                 prompt=summary_prompt,
             )
             summary = summary_resp.completion_text or "跑团已结束，未能生成总结。"
-        except Exception:
-            summary = "跑团已结束，总结生成失败。"
+        except Exception as primary_exc:
+            if not fallback_provider_id:
+                summary = "跑团已结束，总结生成失败。"
+            else:
+                try:
+                    logger.warning("TRPG summary primary provider %s failed (%s), trying fallback %s",
+                                   provider_id, primary_exc, fallback_provider_id)
+                    summary_resp = await context.llm_generate(
+                        chat_provider_id=fallback_provider_id,
+                        prompt=summary_prompt,
+                    )
+                    summary = summary_resp.completion_text or "跑团已结束，未能生成总结。"
+                except Exception:
+                    summary = "跑团已结束，总结生成失败。"
 
         # Save history
         self.store.create_session_history(
@@ -393,3 +472,7 @@ class TrpgService:
         if not cleaned_reply:
             return final_message
         return f"{cleaned_reply}\n\n{final_message}"
+
+
+def _normalize_scenario_ref(value: str) -> str:
+    return re.sub(r"[\s《》「」『』【】\[\]（）()\"'“”‘’]+", "", value).casefold()
