@@ -1,6 +1,6 @@
 {
   "admin_user_ids": {
-    "description": "允许执行导入、发布、重置的管理员用户 ID 列表。",
+    "description": "允许执行导入、发布、重置等管理操作的管理员用户 ID 列表。WebUI 页面本身依赖 AstrBot Dashboard 鉴权。",
     "type": "list",
     "default": [],
     "items": {
@@ -18,12 +18,12 @@
     "default": 20
   },
   "db_filename": {
-    "description": "SQLite 数据库文件名，将保存在插件数据目录下。",
+    "description": "SQLite 数据库文件名，将保存在插件数据目录下。修改后需要重启插件才会切换数据库文件。",
     "type": "string",
     "default": "trpg.sqlite3"
   },
   "bootstrap_builtin_scenarios": {
-    "description": "插件启动时是否自动初始化内置剧本包。开启后，首次启动会自动上架内置剧本，后续不会重复导入。",
+    "description": "插件启动时是否自动初始化内置剧本包。开启后，首次启动会自动上架内置剧本，后续不会重复导入。修改后需要重启插件生效。",
     "type": "bool",
     "default": true
   },
@@ -51,5 +51,15 @@
     "description": "单人跑团备用 LLM 模型 Provider ID。当主模型调用失败时自动切换。为空则不使用备用模型。",
     "type": "string",
     "default": ""
+  },
+  "max_upload_chars": {
+    "description": "WebUI 上传 Markdown 文本允许的最大字符数。仅影响 WebUI 上传接口，不影响聊天命令导入。",
+    "type": "int",
+    "default": 200000
+  },
+  "session_history_limit": {
+    "description": "WebUI 跑团记录接口最多返回多少条历史记录。",
+    "type": "int",
+    "default": 100
   }
 }

@@ -35,9 +35,16 @@ class TrpgPlugin(Star):
 
     async def initialize(self) -> None:
         """Called when plugin is activated. Registers Web API routes for Plugin Pages."""
-        import json
-
-        from .core.web_api import TrpgWebApi
+        try:
+            from .core.web_api import TrpgWebApi
+        except ModuleNotFoundError as exc:
+            if exc.name != "quart":
+                raise
+            logger.warning(
+                "TRPG WebUI API disabled because quart is not installed. "
+                "Command and LLM tool features remain available."
+            )
+            return
 
         plugin_data_dir = Path(get_astrbot_data_path()) / "plugin_data" / PLUGIN_NAME
         conf_schema = self._load_conf_schema()
@@ -57,7 +64,12 @@ class TrpgPlugin(Star):
             (f"{prefix}/trpg/web/scenarios/<id>/publish", web_api.publish_scenario, ["POST"], "发布剧本"),
             (f"{prefix}/trpg/web/scenarios/upload", web_api.upload_scenario, ["POST"], "上传剧本"),
             (f"{prefix}/trpg/web/sessions", web_api.get_sessions, ["GET"], "获取跑团记录"),
-            (f"{prefix}/trpg/web/sessions/<platform>/<session_id>", web_api.get_session_detail, ["GET"], "获取会话详情"),
+            (
+                f"{prefix}/trpg/web/sessions/<platform>/<session_id>",
+                web_api.get_session_detail,
+                ["GET"],
+                "获取会话详情",
+            ),
             (f"{prefix}/trpg/web/config", web_api.get_config, ["GET"], "获取配置"),
             (f"{prefix}/trpg/web/config", web_api.save_config, ["POST"], "保存配置"),
         ]
@@ -171,7 +183,9 @@ class TrpgPlugin(Star):
         """查看已发布剧本列表"""
         scenarios = self.service.list_published(self._max_list_size())
         if not scenarios:
-            yield event.plain_result("当前还没有已发布的剧本。请联系管理员执行 `/trpg 初始化内置剧本`，或手动导入并发布。")
+            yield event.plain_result(
+                "当前还没有已发布的剧本。请联系管理员执行 `/trpg 初始化内置剧本`，或手动导入并发布。"
+            )
             return
 
         yield event.plain_result(self.service.format_scenario_list("可选剧本列表", scenarios))

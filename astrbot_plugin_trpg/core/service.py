@@ -6,8 +6,6 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-logger = logging.getLogger("astrbot")
-
 from .builtin_scenarios import BUILTIN_SCENARIO_MARKDOWN, BUILTIN_SCENARIO_SOURCE_KEY
 from .parser import OutlineParseError, parse_scenario_outline
 from .solo_mode import (
@@ -24,6 +22,8 @@ from .store import (
     SoloSessionView,
     TrpgStore,
 )
+
+logger = logging.getLogger("astrbot")
 
 
 @dataclass(slots=True)
@@ -328,7 +328,9 @@ class TrpgService:
         if not session:
             return "当前没有正在进行的单人跑团。"
 
-        return await self._finalize_session(context, event, provider_id, platform_name, session_id, fallback_provider_id)
+        return await self._finalize_session(
+            context, event, provider_id, platform_name, session_id, fallback_provider_id,
+        )
 
     async def _finalize_session(
         self,

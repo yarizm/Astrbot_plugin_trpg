@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import logging
 from pathlib import Path
 
@@ -28,7 +27,11 @@ def _json_error(message: str, code: int = 400):
 
 
 class TrpgWebApi:
-    """Web API handlers for the TRPG plugin admin UI."""
+    """Web API handlers for the TRPG plugin admin UI.
+
+    These routes are registered through AstrBot's Dashboard plugin page API.
+    AstrBot Dashboard authentication is expected to be the access boundary.
+    """
 
     def __init__(
         self,
@@ -88,6 +91,22 @@ class TrpgWebApi:
             "created_at": s.created_at,
             "updated_at": s.updated_at,
         }
+
+    def _config_int(self, key: str, default: int, minimum: int = 1, maximum: int | None = None) -> int:
+        try:
+            value = int(self.plugin_config.get(key, default) or default)
+        except (TypeError, ValueError):
+            value = default
+        value = max(minimum, value)
+        if maximum is not None:
+            value = min(value, maximum)
+        return value
+
+    def _max_upload_chars(self) -> int:
+        return self._config_int("max_upload_chars", 200_000, minimum=1_000, maximum=2_000_000)
+
+    def _session_history_limit(self) -> int:
+        return self._config_int("session_history_limit", 100, minimum=1, maximum=1_000)
 
     # --- Scenario endpoints ---
 
@@ -164,16 +183,22 @@ class TrpgWebApi:
                 return _json_error("未上传文件")
 
             filename = field.filename or "upload.md"
-            if not filename.endswith((".md", ".markdown", ".txt")):
+            if not filename.lower().endswith((".md", ".markdown", ".txt")):
                 return _json_error("仅支持 .md / .markdown / .txt 文件")
 
             content_bytes = field.read()
-            if len(content_bytes) > 200_000:
-                return _json_error("文件过大（最大 200KB）")
+            max_upload_chars = self._max_upload_chars()
+            if len(content_bytes) > max_upload_chars * 4:
+                return _json_error(f"文件过大（最多约 {max_upload_chars} 个 UTF-8 字符）")
 
-            markdown_text = content_bytes.decode("utf-8").strip()
+            try:
+                markdown_text = content_bytes.decode("utf-8").strip()
+            except UnicodeDecodeError:
+                return _json_error("文件编码错误：请上传 UTF-8 编码的 Markdown / 文本文件")
             if not markdown_text:
                 return _json_error("文件内容为空")
+            if len(markdown_text) > max_upload_chars:
+                return _json_error(f"文件内容过长（最多 {max_upload_chars} 个字符）")
 
             created = self.service.store.create_import_with_scenarios(
                 source_markdown=markdown_text,
@@ -198,7 +223,7 @@ class TrpgWebApi:
 
     async def get_sessions(self, **kwargs):
         try:
-            history = self.service.store.list_all_session_history(limit=100)
+            history = self.service.store.list_all_session_history(limit=self._session_history_limit())
             active = self.service.store.list_active_sessions()
 
             seen = set()
@@ -234,7 +259,7 @@ class TrpgWebApi:
                 return _json_error("缺少 platform 或 session_id")
 
             history = self.service.store.list_session_history(
-                platform, session_id, limit=50,
+                platform, session_id, limit=self._session_history_limit(),
             )
             return _json_ok([self._history_to_dict(h) for h in history])
         except Exception as e:
@@ -248,8 +273,9 @@ class TrpgWebApi:
             config_data = {}
             for key, schema in self.conf_schema.items():
                 value = self.plugin_config.get(key, schema.get("default"))
+                display_value = "***" if key in _SENSITIVE_CONFIG_KEYS and value else value
                 config_data[key] = {
-                    "value": value,
+                    "value": display_value,
                     "type": schema.get("type", "string"),
                     "description": schema.get("description", ""),
                     "default": schema.get("default"),
