@@ -12,21 +12,35 @@
 - **WebUI 管理面板**：通过 AstrBot Dashboard 内置页面访问，支持剧本编辑/发布、跑团记录查看、插件配置管理
 - **内置剧本**：附带 3 个官方剧本，首次启动自动上架
 
-## 安装
+## 安装与启用
 
-### 从 AstrBot 插件目录安装
+### 版本要求
 
-1. 将仓库中的 `astrbot_plugin_trpg/` 目录复制到 AstrBot 的插件目录。
-2. 在 AstrBot Dashboard 中启用插件，或重启 AstrBot。
-3. 在插件配置中填写 `admin_user_ids`，否则导入、发布、重置、导出等管理员命令会被拒绝。
-4. 首次启动默认会自动初始化 3 个内置剧本，可通过 `/trpg 剧本列表` 验证。
+- 插件声明的 AstrBot 版本要求为 `>=4.24.2,<5`，与 `metadata.yaml` 保持一致。
+- WebUI 管理面板依赖 AstrBot `>=4.24.2` 的插件页面能力。
 
-### 从源码开发
+### 手动安装
 
-```powershell
-python -m pip install -r astrbot_plugin_trpg/requirements.txt
-python -m unittest discover -s tests -v
-```
+1. 下载或克隆本仓库。
+2. 将 `astrbot_plugin_trpg` 文件夹放入 AstrBot 的 `plugins` 目录。
+3. 重启 AstrBot。
+4. 在 AstrBot Dashboard 的插件管理界面启用 `跑团选本助手`。
+
+### 依赖安装
+
+- 插件依赖 `requirements.txt`，当前包含 `quart`。
+- 通过 AstrBot 插件管理器安装时，通常会按插件依赖声明自动安装。
+- 如果是手动部署，请按 AstrBot 的插件依赖安装方式安装 `requirements.txt` 中的依赖。
+
+### 首次配置
+
+1. 进入插件配置页面，填写 `admin_user_ids`。
+2. 按需调整 `db_filename`、`max_import_chars`、`max_upload_chars`、`session_history_limit` 等配置。
+3. 部分配置需要重启插件或 AstrBot 后生效，配置说明中会注明。
+
+### WebUI 入口
+
+重启并启用插件后，在 AstrBot Dashboard 的插件管理界面打开本插件，即可进入 WebUI 管理面板。
 
 ## 版本兼容
 
@@ -200,8 +214,6 @@ python -m unittest discover -s tests -v
 
 插件内置 WebUI 管理面板，通过 AstrBot Dashboard 的插件详情页进入（要求 AstrBot >= 4.24.2）。
 
-> 截图占位：发布 Release 时建议补充 Dashboard 插件页面入口、剧本列表、编辑页、跑团记录页和配置页截图。
-
 功能：
 - **剧本管理**：查看、编辑、发布剧本，支持拖拽上传 Markdown 文件导入
 - **跑团记录**：查看进行中的会话和历史跑团记录
@@ -214,6 +226,16 @@ python -m unittest discover -s tests -v
 - WebUI API 的访问边界依赖 AstrBot Dashboard 登录态和插件页面路由保护；请不要将 Dashboard 暴露到不可信公网。
 - WebUI 中剧本编辑、发布、上传、配置读取/保存和跑团记录查看均按 Dashboard 管理页面能力处理，不再额外读取聊天平台的 `admin_user_ids`。
 - 上传接口仅接受 UTF-8 编码的 `.md`、`.markdown`、`.txt` 文件，扩展名大小写不敏感，大小由 `max_upload_chars` 控制。
+
+## 界面预览
+
+当前仓库暂未包含实际截图文件。建议后续发布时补充以下截图：
+
+- 剧本管理页面
+- 剧本编辑与发布页面
+- 跑团记录页面
+- 插件配置页面
+- 单人跑团相关对话示例
 
 ## 管理员权限
 
