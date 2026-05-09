@@ -33,6 +33,50 @@ class TrpgPlugin(Star):
         self._last_session_summaries: dict[tuple[str, str, str], str] = {}
         self._bootstrap_builtin_scenarios()
 
+    async def initialize(self) -> None:
+        """Called when plugin is activated. Registers Web API routes for Plugin Pages."""
+        import json
+
+        from .core.web_api import TrpgWebApi
+
+        plugin_data_dir = Path(get_astrbot_data_path()) / "plugin_data" / PLUGIN_NAME
+        conf_schema = self._load_conf_schema()
+        web_api = TrpgWebApi(
+            service=self.service,
+            store=self.store,
+            plugin_config=self.config,
+            plugin_data_dir=plugin_data_dir,
+            conf_schema=conf_schema,
+        )
+
+        prefix = f"/{PLUGIN_NAME}"
+        routes = [
+            (f"{prefix}/trpg/web/scenarios", web_api.get_scenarios, ["GET"], "获取剧本列表"),
+            (f"{prefix}/trpg/web/scenarios/<id>", web_api.get_scenario, ["GET"], "获取剧本详情"),
+            (f"{prefix}/trpg/web/scenarios/<id>", web_api.update_scenario, ["POST"], "更新剧本"),
+            (f"{prefix}/trpg/web/scenarios/<id>/publish", web_api.publish_scenario, ["POST"], "发布剧本"),
+            (f"{prefix}/trpg/web/scenarios/upload", web_api.upload_scenario, ["POST"], "上传剧本"),
+            (f"{prefix}/trpg/web/sessions", web_api.get_sessions, ["GET"], "获取跑团记录"),
+            (f"{prefix}/trpg/web/sessions/<platform>/<session_id>", web_api.get_session_detail, ["GET"], "获取会话详情"),
+            (f"{prefix}/trpg/web/config", web_api.get_config, ["GET"], "获取配置"),
+            (f"{prefix}/trpg/web/config", web_api.save_config, ["POST"], "保存配置"),
+        ]
+
+        for route, handler, methods, desc in routes:
+            self.context.register_web_api(route, handler, methods, desc)
+
+        logger.info("TRPG WebUI API routes registered (%d routes)", len(routes))
+
+    @staticmethod
+    def _load_conf_schema() -> dict:
+        import json
+        schema_path = Path(__file__).parent / "_conf_schema.json"
+        try:
+            return json.loads(schema_path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            logger.warning("TRPG: failed to load conf schema: %s", exc)
+            return {}
+
     @filter.command_group("trpg")
     def trpg(self):
         """跑团选本命令组"""

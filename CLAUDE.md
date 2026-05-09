@@ -38,6 +38,10 @@
 
 - [core/builtin_scenarios.py](astrbot_plugin_trpg/core/builtin_scenarios.py) — 包含 3 个内置剧本，以原始 Markdown 字符串常量存储。通过 `source_key` 幂等播种。
 
+- [core/web_api.py](astrbot_plugin_trpg/core/web_api.py) — `TrpgWebApi` 提供 WebUI 后端 API。9 个端点覆盖剧本 CRUD（列表/详情/更新/发布/上传）、会话记录（列表/详情）、配置读写。通过 `self.context.register_web_api()` 注册到 AstrBot 路由系统。配置保存时校验类型并调用 `AstrBotConfig.save_config()` 持久化到磁盘。
+
+- [pages/admin/](astrbot_plugin_trpg/pages/admin/) — AstrBot 插件页面，包含 `index.html`、`style.css`、`app.js`。通过 AstrBot Bridge SDK（`window.AstrBotPluginPage`）与后端通信，运行在 sandboxed iframe 中。支持剧本编辑/发布、拖拽上传、跑团记录查看、在线配置管理。
+
 ## 关键模式
 
 - **LLM 主导的单人跑团**：玩家消息 → 构建系统提示词（剧本+记录板+阶段+历史摘要）→ `tool_loop_agent` 驱动 LLM 自由叙事 + 按需调用 4 个 FunctionTool → 更新会话状态。LLM 自主决定何时骰骰子、何时记录、何时推进阶段。
@@ -47,6 +51,8 @@
 - **会话历史与总结**：结束单人跑团时，通过 `llm_generate` 单独调用 LLM 生成 100 字以内的总结，存入 `session_history` 表，然后清空 `solo_sessions` 对应记录。下次开同一剧本时，历史摘要会注入系统提示词。
 - **剧本 Markdown 可视化**：`export_scenario_markdown()` 将剧本导出为格式化的 `.md` 文件，存储在 `{plugin_data_dir}/scenarios/` 目录下。
 - **延迟导入隔离**：`core/tools.py` 依赖 `astrbot` 包，仅在运行时延迟导入（`service.py` 的方法内部 import）。测试链不经过 `tools.py`。
+- **WebUI Plugin Pages**：前端页面通过 AstrBot 内置页面系统托管，运行在 sandboxed iframe（`sandbox="allow-scripts allow-forms allow-downloads"`）中，无 `allow-same-origin`。Bridge SDK 通过 postMessage 通信。前端请求路径为相对路径（如 `trpg/web/scenarios`），由 Bridge SDK 转换为 `/api/plug/{pluginName}/{endpoint}`。
+- **配置安全**：`_SENSITIVE_CONFIG_KEYS` 中的配置项（`solo_provider_id`、`solo_fallback_provider_id`、`admin_user_ids`）在 WebUI 中标记为敏感，前端保存配置前弹出确认对话框。
 
 ## 配置
 
@@ -62,6 +68,8 @@
 | `scenario_export_dir` | string | scenarios | 剧本 MD 导出目录（相对插件数据目录） |
 | `solo_max_steps` | int | 10 | 单人跑团 LLM agent 每轮最大工具调用步数 |
 | `solo_system_prompt_override` | string | "" | 自定义单人跑团系统提示词（为空则使用内置默认） |
+| `solo_provider_id` | string | "" | 单人跑团 LLM Provider ID，为空则使用默认模型 |
+| `solo_fallback_provider_id` | string | "" | 单人跑团备用 LLM Provider ID，主模型失败时自动切换 |
 
 ## 依赖
 

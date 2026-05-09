@@ -221,6 +221,66 @@ class TrpgStore:
             ).fetchall()
         return [_row_to_scenario(row) for row in rows]
 
+    def list_scenarios_all(self, limit: int = 100) -> list[ScenarioRecord]:
+        limit = max(1, limit)
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT
+                    id,
+                    outline_import_id,
+                    title,
+                    summary,
+                    tags,
+                    recommended_players,
+                    opening_scene,
+                    raw_markdown,
+                    status,
+                    created_at,
+                    published_at
+                FROM scenario_candidates
+                ORDER BY id ASC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+        return [_row_to_scenario(row) for row in rows]
+
+    def update_scenario_content(
+        self,
+        scenario_id: int,
+        title: str,
+        summary: str,
+        tags: str,
+        recommended_players: str,
+        opening_scene: str,
+        raw_markdown: str,
+    ) -> ScenarioRecord | None:
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE scenario_candidates
+                SET title = ?, summary = ?, tags = ?, recommended_players = ?,
+                    opening_scene = ?, raw_markdown = ?
+                WHERE id = ?
+                """,
+                (title, summary, tags, recommended_players, opening_scene, raw_markdown, scenario_id),
+            )
+            if cursor.rowcount == 0:
+                return None
+            row = connection.execute(
+                """
+                SELECT
+                    id, outline_import_id, title, summary, tags,
+                    recommended_players, opening_scene, raw_markdown,
+                    status, created_at, published_at
+                FROM scenario_candidates
+                WHERE id = ?
+                """,
+                (scenario_id,),
+            ).fetchone()
+        return _row_to_scenario(row) if row else None
+
     def get_scenario(self, scenario_id: int) -> ScenarioRecord | None:
         with self._connect() as connection:
             row = connection.execute(
@@ -569,6 +629,79 @@ class TrpgStore:
                 final_stage=row["final_stage"],
                 started_at=row["started_at"],
                 ended_at=row["ended_at"],
+            )
+            for row in rows
+        ]
+
+    def list_all_session_history(self, limit: int = 50) -> list[SessionHistoryRecord]:
+        limit = max(1, limit)
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT id, platform_name, session_id, scenario_id, user_id,
+                       turn_count, summary, notes_snapshot, final_stage,
+                       started_at, ended_at
+                FROM session_history
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+        return [
+            SessionHistoryRecord(
+                id=row["id"],
+                platform_name=row["platform_name"],
+                session_id=row["session_id"],
+                scenario_id=row["scenario_id"],
+                user_id=row["user_id"],
+                turn_count=row["turn_count"],
+                summary=row["summary"],
+                notes_snapshot=row["notes_snapshot"],
+                final_stage=row["final_stage"],
+                started_at=row["started_at"],
+                ended_at=row["ended_at"],
+            )
+            for row in rows
+        ]
+
+    def list_active_sessions(self) -> list[SoloSessionView]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT
+                    ss.platform_name,
+                    ss.session_id,
+                    ss.user_id,
+                    ss.scenario_id,
+                    ss.transcript_json,
+                    ss.turn_count,
+                    ss.notes_json,
+                    ss.current_stage,
+                    ss.created_at,
+                    ss.updated_at,
+                    sc.title AS scenario_title,
+                    sc.summary AS scenario_summary,
+                    sc.opening_scene AS scenario_opening_scene
+                FROM solo_sessions AS ss
+                JOIN scenario_candidates AS sc ON sc.id = ss.scenario_id
+                ORDER BY ss.updated_at DESC
+                """,
+            ).fetchall()
+        return [
+            SoloSessionView(
+                platform_name=row["platform_name"],
+                session_id=row["session_id"],
+                user_id=row["user_id"],
+                scenario_id=row["scenario_id"],
+                scenario_title=row["scenario_title"],
+                scenario_summary=row["scenario_summary"],
+                scenario_opening_scene=row["scenario_opening_scene"],
+                transcript_json=row["transcript_json"],
+                turn_count=row["turn_count"],
+                notes_json=row["notes_json"],
+                current_stage=row["current_stage"],
+                created_at=row["created_at"],
+                updated_at=row["updated_at"],
             )
             for row in rows
         ]

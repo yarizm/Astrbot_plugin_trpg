@@ -9,6 +9,7 @@
 - **单人跑团**（LLM 主导）：在私聊中开启单人跑团，由 LLM 担任 GM 自由叙事，支持骰子判定、记录板、阶段推进
 - **跑团历史**：每次跑团结束后自动生成 LLM 总结，保存历史记录
 - **剧本导出**：将剧本导出为格式化的 Markdown 文件
+- **WebUI 管理面板**：通过 AstrBot Dashboard 内置页面访问，支持剧本编辑/发布、跑团记录查看、插件配置管理
 - **内置剧本**：附带 3 个官方剧本，首次启动自动上架
 
 ## 目录结构
@@ -20,6 +21,8 @@
 - `core/solo_mode.py`：纯函数模块（骰子、系统提示词构建）
 - `core/tools.py`：4 个 FunctionTool 定义（骰子/记录板/进度/结束会话）
 - `core/builtin_scenarios.py`：插件内置剧本包
+- `core/web_api.py`：WebUI 后端 API（剧本 CRUD、会话记录、配置管理）
+- `pages/admin/`：AstrBot 插件页面（HTML/CSS/JS），通过 Bridge SDK 与后端通信
 - `tests/`：核心逻辑单元测试
 
 ## 命令
@@ -155,6 +158,20 @@
 ```
 
 导出的文件保存在 `{插件数据目录}/scenarios/` 下，文件名格式为 `{id}_{标题}.md`。
+
+## WebUI 管理面板
+
+插件内置 WebUI 管理面板，通过 AstrBot Dashboard 的插件详情页进入（要求 AstrBot >= 4.24.2）。
+
+功能：
+- **剧本管理**：查看、编辑、发布剧本，支持拖拽上传 Markdown 文件导入
+- **跑团记录**：查看进行中的会话和历史跑团记录
+- **插件配置**：在线修改插件配置项，敏感配置需确认后保存
+
+技术说明：
+- 前端通过 AstrBot Bridge SDK（`window.AstrBotPluginPage`）与后端通信
+- 后端 API 在 `core/web_api.py` 中实现，通过 `register_web_api` 注册到 AstrBot 路由系统
+- 前端页面位于 `pages/admin/`，由 AstrBot 内置页面系统自动托管
 
 ## 配置
 

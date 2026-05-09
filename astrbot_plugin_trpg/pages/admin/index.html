@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TRPG 插件管理</title>
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <!-- Header -->
+  <div class="app-header">
+    <h1>TRPG 跑团管理</h1>
+    <p>剧本管理 &middot; 跑团记录 &middot; 插件配置</p>
+  </div>
+
+  <!-- Toast notifications -->
+  <div id="toast" class="toast"></div>
+
+  <div class="app-container">
+    <!-- Tab navigation -->
+    <div class="tabs">
+      <button class="tab-btn active" data-tab="scenarios">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/></svg>
+        <span class="tab-label">剧本管理</span>
+      </button>
+      <button class="tab-btn" data-tab="sessions">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8v4l3 3"/><circle cx="12" cy="12" r="10"/></svg>
+        <span class="tab-label">跑团记录</span>
+      </button>
+      <button class="tab-btn" data-tab="config">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 1v2m0 18v2M4.22 4.22l1.42 1.42m12.72 12.72 1.42 1.42M1 12h2m18 0h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
+        <span class="tab-label">插件配置</span>
+      </button>
+    </div>
+
+    <!-- Tab: Scenarios -->
+    <div id="tab-scenarios" class="tab-panel active">
+      <!-- Upload area -->
+      <div id="upload-area" class="upload-area">
+        <div class="upload-spinner"></div>
+        <div class="icon">
+          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#6366f1" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+        </div>
+        <div class="upload-text">拖拽 Markdown 文件到此处，或 <strong>点击选择文件</strong></div>
+        <div class="hint">支持 .md / .markdown / .txt，最大 200KB</div>
+        <input type="file" id="file-input" accept=".md,.markdown,.txt" style="display:none">
+      </div>
+
+      <!-- Filter bar -->
+      <div class="filter-bar">
+        <select id="status-filter">
+          <option value="">全部状态</option>
+          <option value="draft">草稿</option>
+          <option value="published">已发布</option>
+          <option value="archived">已归档</option>
+        </select>
+        <button class="btn btn-outline btn-sm" id="btn-refresh-scenarios">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+          刷新
+        </button>
+      </div>
+
+      <!-- Scenario list -->
+      <div id="scenario-list" class="scenario-grid"></div>
+
+      <!-- Scenario detail / edit view (hidden by default) -->
+      <div id="scenario-detail" style="display:none">
+        <div class="back-link" id="btn-back-list">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
+          返回列表
+        </div>
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title" id="detail-title"></span>
+            <div>
+              <button class="btn btn-success btn-sm" id="btn-save-scenario">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+                保存
+              </button>
+              <button class="btn btn-outline btn-sm" id="btn-publish-scenario">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/></svg>
+                发布
+              </button>
+            </div>
+          </div>
+          <div class="form-group">
+            <label>标题</label>
+            <input type="text" class="form-control" id="edit-title" placeholder="剧本标题">
+          </div>
+          <div class="form-group">
+            <label>简介</label>
+            <textarea class="form-control" id="edit-summary" rows="3" placeholder="一句话描述这个剧本..."></textarea>
+          </div>
+          <div class="form-group">
+            <label>标签（逗号分隔）</label>
+            <input type="text" class="form-control" id="edit-tags" placeholder="恐怖, 解谜, 3-4人">
+          </div>
+          <div class="form-group">
+            <label>推荐人数</label>
+            <input type="text" class="form-control" id="edit-players" placeholder="3-5人">
+          </div>
+          <div class="form-group">
+            <label>开场设定</label>
+            <textarea class="form-control" id="edit-opening" rows="3" placeholder="描述开场场景..."></textarea>
+          </div>
+          <div class="form-group">
+            <label>剧本原文（Markdown）</label>
+            <textarea class="form-control code-editor" id="edit-raw" placeholder="# 剧本标题&#10;&#10;在这里输入完整的剧本内容..."></textarea>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tab: Sessions -->
+    <div id="tab-sessions" class="tab-panel">
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">跑团记录</span>
+          <button class="btn btn-outline btn-sm" id="btn-refresh-sessions">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+            刷新
+          </button>
+        </div>
+        <div id="session-list"></div>
+      </div>
+
+      <!-- Session detail (hidden by default) -->
+      <div id="session-detail" style="display:none">
+        <div class="back-link" id="btn-back-sessions">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
+          返回列表
+        </div>
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title" id="session-detail-title"></span>
+          </div>
+          <div id="session-history-list"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tab: Config -->
+    <div id="tab-config" class="tab-panel">
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">插件配置</span>
+        </div>
+        <div id="config-form" class="config-form"></div>
+        <div class="save-bar">
+          <button class="btn btn-success" id="btn-save-config">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+            保存配置
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Patch: fix postMessage target origin in sandboxed iframe (AstrBot <4.24.3) -->
+  <script>
+  (function(){
+    var orig = window.parent.postMessage.bind(window.parent);
+    window.parent.postMessage = function(msg, targetOrigin, transfer) {
+      if (targetOrigin === "null" || targetOrigin === null || targetOrigin === undefined) {
+        targetOrigin = "*";
+      }
+      return transfer !== undefined ? orig(msg, targetOrigin, transfer) : orig(msg, targetOrigin);
+    };
+  })();
+  </script>
+  <script src="./app.js"></script>
+</body>
+</html>
