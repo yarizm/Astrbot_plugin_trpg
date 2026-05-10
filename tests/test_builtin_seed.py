@@ -3,8 +3,9 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 from uuid import uuid4
-from astrbot_plugin_trpg.core.service import TrpgService
-from astrbot_plugin_trpg.core.store import STATUS_PUBLISHED, TrpgStore
+
+from core.service import TrpgService
+from core.store import STATUS_PUBLISHED, TrpgStore
 
 
 class BuiltinScenarioSeedTest(unittest.TestCase):

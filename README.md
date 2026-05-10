@@ -22,7 +22,7 @@
 ### 手动安装
 
 1. 下载或克隆本仓库。
-2. 将 `astrbot_plugin_trpg` 文件夹放入 AstrBot 的 `plugins` 目录。
+2. 将本仓库目录作为插件目录放入 AstrBot 的 `plugins` 目录。
 3. 重启 AstrBot。
 4. 在 AstrBot Dashboard 的插件管理界面启用 `跑团选本助手`。
 
@@ -264,9 +264,9 @@
 ## 开发验证
 
 ```powershell
-python -m py_compile astrbot_plugin_trpg/main.py
+python -m py_compile main.py
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ruff check .
 ```
 
-GitHub Actions 会在推送和 PR 时执行 `ruff check .`、`python -m py_compile astrbot_plugin_trpg/main.py` 和 `python -m unittest discover -s tests -v`。
+GitHub Actions 会在推送和 PR 时执行 `ruff check .`、`python -m py_compile main.py` 和 `python -m unittest discover -s tests -v`。

@@ -23,7 +23,7 @@
 
 ### 安装说明
 
-- 将 `astrbot_plugin_trpg` 文件夹放入 AstrBot 的 `plugins` 目录。
+- 将本仓库目录作为插件目录放入 AstrBot 的 `plugins` 目录。
 - 重启 AstrBot，并在 Dashboard 插件管理界面启用插件。
 - 如手动部署，请按 AstrBot 插件依赖安装方式安装 `requirements.txt` 中的依赖。
 - 进入插件配置页面填写 `admin_user_ids` 后，再使用导入、发布、重置、导出等管理员能力。

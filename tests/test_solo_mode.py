@@ -5,9 +5,9 @@ import unittest
 from pathlib import Path
 from uuid import uuid4
 
-from astrbot_plugin_trpg.core.service import TrpgService
-from astrbot_plugin_trpg.core.solo_mode import build_system_prompt, roll_dice
-from astrbot_plugin_trpg.core.store import TrpgStore
+from core.service import TrpgService
+from core.solo_mode import build_system_prompt, roll_dice
+from core.store import TrpgStore
 
 
 class DiceRollTest(unittest.TestCase):

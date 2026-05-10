@@ -7,9 +7,9 @@ import unittest
 from pathlib import Path
 from uuid import uuid4
 
-from astrbot_plugin_trpg.core.parser import ParsedScenario
-from astrbot_plugin_trpg.core.service import TrpgService
-from astrbot_plugin_trpg.core.store import STATUS_PUBLISHED, TrpgStore
+from core.parser import ParsedScenario
+from core.service import TrpgService
+from core.store import STATUS_PUBLISHED, TrpgStore
 
 
 class _FakeFunctionTool:
@@ -87,7 +87,7 @@ class ServiceRegressionTest(unittest.TestCase):
                 "astrbot.core",
                 "astrbot.core.agent",
                 "astrbot.core.agent.tool",
-                "astrbot_plugin_trpg.core.tools",
+                "core.tools",
             )
         }
         try:
@@ -95,7 +95,7 @@ class ServiceRegressionTest(unittest.TestCase):
             sys.modules["astrbot.core"] = types.ModuleType("astrbot.core")
             sys.modules["astrbot.core.agent"] = types.ModuleType("astrbot.core.agent")
             sys.modules["astrbot.core.agent.tool"] = fake_tool_module
-            sys.modules.pop("astrbot_plugin_trpg.core.tools", None)
+            sys.modules.pop("core.tools", None)
 
             result = asyncio.run(
                 self.service.advance_solo_session_llm(

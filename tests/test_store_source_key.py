@@ -4,8 +4,8 @@ import unittest
 from pathlib import Path
 from uuid import uuid4
 
-from astrbot_plugin_trpg.core.parser import ParsedScenario
-from astrbot_plugin_trpg.core.store import STATUS_DRAFT, TrpgStore
+from core.parser import ParsedScenario
+from core.store import STATUS_DRAFT, TrpgStore
 
 
 class StoreSourceKeyTest(unittest.TestCase):
